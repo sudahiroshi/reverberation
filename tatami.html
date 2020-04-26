@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html>
+<head lang="ja">
+    <meta charset="UTF-8">
+    <title>Convolution Simulator -1-</title>
+    <script>
+        //フィルタの波形を表示するためのキャンバス準備
+        var CANVAS_WIDTH = 1000;
+        var CANVAS_HEIGHT = 250;
+        var binaryIndex = 0,binaryData;
+        var waveDataR, waveDataL, drawPixels;
+
+        //AudioContextの作成
+        //全ての音声関連を統治する要素`ctx`を作成
+        var ctx = new AudioContext();
+        //マイクから音声データを取得しそれを格納するための要素`mic`を作成
+        var mic;
+        //Convolverノードの作成
+        var convolver = ctx.createConvolver();
+        //Analyserノードの作成
+        //`analyser`は加工前の音声データの波形要素
+        //`conanalyser`は加工後の音声データの波形要素
+        var analyser = ctx.createAnalyser();
+        var conanalyser = ctx.createAnalyser();
+
+
+        //*********************************************************
+        analyser.fftSize = 1024;
+        conanalyser.fftSize = 1024;
+        //***********************************************************
+
+
+
+        //button制御（操作ボタンを押したら他行動を規制する）
+        function wupBtn(button){
+          if(button==a5){
+            a1 = document.getElementById("a1");
+            a2 = document.getElementById("a2");
+            a3 = document.getElementById("a3");
+            a4 = document.getElementById("a4");
+            a1.disabled = false;
+            a2.disabled = false;
+            a3.disabled = false;
+            a4.disabled = false;
+          }else{
+            a1 = document.getElementById("a1");
+            a2 = document.getElementById("a2");
+            a3 = document.getElementById("a3");
+            a4 = document.getElementById("a4");
+            a1.disabled = true;
+            a3.disabled = true;
+            a2.disabled = true;
+            a4.disabled = true;
+          }
+        }
+
+        //ボタンが押された時の処理内容
+        function func( button, filename ) {
+          var button1 = document.getElementById( button );
+          button1.addEventListener('click', function () {
+            //メディアデバイス（マイク）の仕様準備
+            navigator.getUserMedia = (navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia);
+            //音声を扱うための制約
+            navigator.getUserMedia({audio : true}, successCallback, errorCallback);
+            function successCallback(stream) {
+              mic = ctx.createMediaStreamSource(stream);
+              mic.connect(analyser);//追加
+              mic.connect(convolver);
+            }
+            function errorCallback(msg) {
+              console.log(msg);
+            }if( filename != null ) {
+              var loader = new BufferLoader(ctx, filename, function (foo) {
+                convolver.buffer = foo;
+                convolver.connect(conanalyser);
+                //信号出力
+                freqDraw();
+                convoDraw();
+                convolver.connect(ctx.destination);
+              });
+              loader.loadBuffer(filename);
+            } else {
+              freqDraw();
+              convoDraw();
+              //信号出力
+              convolver.connect(ctx.destination);
+            }
+          });
+        }
+
+        function BufferLoader( context, urlList, callback ) {
+          this.context = context;
+          this.urlList = urlList;
+          this.onload = callback;
+        }
+        BufferLoader.prototype.loadBuffer = function( url ) {
+          var request = new XMLHttpRequest();
+          request.open( "GET", url, true );
+          request.responseType = "arraybuffer";
+          request.send();
+
+          var loader = this;
+          request.addEventListener( 'load', function(ev) {
+            loader.context.decodeAudioData(
+              request.response,
+              function (buffer) {
+                if (!buffer) {
+                  alert('error decoding file data:' + url);
+                  return;
+                }
+                var view = new Uint8Array( ev.currentTarget.response);
+                checkHeader( view );
+                loader.onload(buffer);
+              },
+              function (error) {
+                console.error('decodeAudioData error', error);
+              }
+            );
+          });
+        };
+        BufferLoader.prototype.load = function() {
+            this.loadBuffer( this.url );
+        };
+
+        function checkHeader(data) {
+          var riff, wave, fmt, channels, sample, info;
+          riff = String.fromCharCode( data[0] ) + String.fromCharCode( data[1] ) + String.fromCharCode( data[2] ) + String.fromCharCode( data[3] );
+          wave = String.fromCharCode( data[8] ) + String.fromCharCode( data[9] ) + String.fromCharCode( data[10] ) + String.fromCharCode( data[11] );
+          fmt = String.fromCharCode( data[12] ) + String.fromCharCode( data[13] ) + String.fromCharCode( data[14] ) + String.fromCharCode( data[15] );
+          channels = data[22];
+          sample = data[34];
+          // 型が曖昧であるため==を使って処理系に変換する
+          if (riff === "RIFF" && wave === "WAVE" && fmt == "fmt " && channels == 2 && sample == 16) {
+            startLoadBinary(data);
+          } else {
+            console.log("format error");
+          }
+        }
+
+
+        function startLoadBinary(data) {
+          var length = data.length;
+          binaryData = data;
+          binaryIndex = 44;
+          drawPixels = 0;
+          waveDataR = new Array((length - 44) / 2);
+          waveDataL = new Array((length - 44) / 2);
+          setTimeout(loadBinary, 1);
+        }
+
+        function loadBinary() {
+          var data = binaryData;
+          var length = data.length;
+          var spp = CANVAS_WIDTH / length;
+          var ctxr = document.getElementById("waveDisplayR").getContext("2d");
+          var ctxl = document.getElementById("waveDisplayL").getContext("2d");
+          ctxl.strokeStyle = 'rgb(0, 0, 0)';
+          ctxr.strokeStyle = 'rgb(0, 0, 0)';
+          var i, s, j, x, yr, yl, en;
+          en = binaryIndex + 500 * 60;
+          for (i = binaryIndex; i < en && i < length; i += 4) {
+            s = data[i] + data[i + 1] * 256;
+            waveDataL[i / 4] = s > 32768 ? s - 65536 : s;
+            s = data[i + 2] + data[i + 3] * 256;
+            waveDataR[i / 4] = s > 32768 ? s - 65536 : s;
+            x = binaryIndex / length * CANVAS_WIDTH;
+            yr = waveDataR[binaryIndex / 4] / 32768.0 * (CANVAS_HEIGHT / 2) + CANVAS_HEIGHT / 2;
+            yl = waveDataL[binaryIndex / 4] / 32768.0 * (CANVAS_HEIGHT / 2) + CANVAS_HEIGHT / 2;
+            binaryIndex = i;
+            ctxl.beginPath();
+            ctxl.moveTo(x, CANVAS_HEIGHT / 2);
+            ctxl.lineTo(x, yl);
+            ctxl.stroke();
+            ctxr.beginPath();
+            ctxr.moveTo(x, CANVAS_HEIGHT / 2);
+            ctxr.lineTo(x, yr);
+            ctxr.stroke();
+          }
+          if (i >= length) {
+            return;
+          } else {
+            setTimeout(loadBinary, 1);
+          }
+        }
+        //ウィンドウ開いた時点でのボタンのidとファイルの紐付け
+        window.addEventListener('load', function(){
+          func( "a1", "echo.wav" );
+          func( "a2", "muffler.wav" );
+          func( "a3", "spring.wav" );
+          func( "a4", "telephone.wav" );
+          func( "a5", null );
+        });
+    </script>
+    <style>
+    /*全体の仕様*/
+    a { text-decoration: none; }
+
+    p{ font-style: oblique; }
+
+    .oblique{
+      font-weight: lighter;
+      font-style: oblique;
+    }
+
+    /*ボタンの仕様*/
+    button{
+      margin: 1px;
+      font-weight: bold;
+      cursor: pointer;
+      font-family: sans-serif;
+      font-size: 11px;
+	    background: -moz-linear-gradient(top,#FFF 0%,#E6E6E6);
+	    background: -webkit-gradient(linear, left top, left bottom, from(#FFF), to(#E6E6E6));
+	    border-radius: 20px;
+	    -moz-border-radius: 20px;
+	    -webkit-border-radius: 20px;
+	    color: #111;
+	    -moz-box-shadow: inset 1px 1px 1px rgba(000,000,000,0.3);
+	    -webkit-box-shadow: inset 1px 1px 1px rgba(000,000,000,0.3);
+	    width: 80px;
+	    padding: 10px 0;
+    }
+    button:hover{ opacity: 0.7; }
+
+    /*全体の領域（ガイドライン限界範囲）*/
+    #area0{
+      padding: 7px;
+      border-radius: 8px;
+      position: absolute;
+      /*width: 1024px;/*横の領域*/
+      width: 1024px;/*横の領域*/
+      height: 768px;/*高さの領域*/
+      z-index: 3;
+      background-color: #f0ffe9;
+    }
+
+    /*波形表示領域*/
+    #area2{
+      /*font-style: oblique;*/
+      position: absolute;
+      padding: 5px;
+      top: 215px;
+      width: 550px;
+      height: 524px;
+      z-index: 2;
+      background-color: #ceffbf;
+    }
+
+    /*畳み込みフィルタの領域（フィルタ波形表示部分）*/
+    #area3{
+      position: absolute;
+      padding: 4px;
+      top:5px;
+      left: 270px; /*領域開始位置*/
+      width: 350px;
+      height: 195px;
+      z-index: 2;
+      background-color: #fffac1;
+    }
+    /*タイトル・公式の領域*/
+    #area5{
+      position: absolute;
+      padding: 4px;
+      top:5px;
+      left: 5px; /*領域開始位置*/
+      width: 250px;
+      height: 100px;
+      z-index: 2;
+      background-color: #a4dcff;
+    }
+    /*リセットボタン領域*/
+    #area6{
+      position: absolute;
+      padding: 4px;
+      top:115px;
+      left: 5px; /*領域開始位置*/
+      width: 250px;
+      height: 85px;
+      z-index: 2;
+      background-color: #ff935b;
+    }
+    </style>
+</head>
+<body>
+<!--<div id="area0">-->
+  <div id="area5">
+    <!-- 公式部分 -->
+    <b>--Convolver Operation--</b><br>
+    <img src="fig01.png" style="zoom:45%"/>
+    <br>
+  </div>
+
+   <from name="send">
+
+
+  <!-- インパルスレスポンスデータ選択部分 -->
+
+  <div id="area6">
+  <b>--START・RESET--</b><br>
+  　<button id="a5" onclick="wupBtn(a5)">START</button>　　
+  <a href="tatami.html"><button >RESET</button></a></div>
+  <div id="area3">
+  <b>--Sound Field Selection--<b><br>
+  <button id="a4" onclick="wupBtn(a4)" disabled>telephone</button>
+  <button id="a2" onclick="wupBtn(a2)" disabled>muffler</button>
+  <button id="a3" onclick="wupBtn(a3)" disabled>spring</button>
+  <button id="a1" onclick="wupBtn(a1)" disabled>echo</button>
+</from>
+<br>
+<!-- インパルスレスポンスデータの波形描画キャンバス -->
+
+<canvas id="waveDisplayL" width=600px height=200px style="border: solid 1px; margin-top: 5px; width: 150px; height: 100px; background-color:#ffffff;";></canvas>
+<canvas id="waveDisplayR" width=600px height=200px style="border: solid 1px; margin-top: 5px; width: 150px; height: 100px; background-color:#ffffff;"></canvas>
+<br><div class="oblique">Left Channels　　　Right Channels</div><br>
+</div>
+
+<div id="area2">
+  <!-- 演算前の音声データ波形描画キャンバス -->
+  <img src="fig03.png" style="zoom:60%;"><br>
+  <canvas id="widthCanvas" width="40" height="325" style="zoom:60%;"></canvas>
+  <canvas id="mainCanvas" width="800" height="280" style="zoom:60%;"></canvas>
+  <canvas id="heightCanvas" width="880" height="30" style="zoom:60%;"></canvas>
+
+  <!-- 演算後の音声データ波形描画キャンバス -->
+  <br><img src="fig02.png" style="zoom:60%;"><br>
+  <canvas id="widthCanvas2" width="40" height="325" style="zoom: 60%;"></canvas>
+  <canvas id="mainCanvas2" width="800" height="280" style="zoom: 60%;"></canvas>
+  <canvas id="heightCanvas2" width="880" height="30" style="zoom: 60%;"></canvas>
+</div>
+</div>
+<script src="freqdraw.js"></script>
+<script src="convodraw.js"></script>
+</body>
+</html>
